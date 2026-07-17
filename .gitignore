@@ -1,0 +1,6 @@
+reports/
+results/
+*.log
+*.tmp
+.vscode/
+.idea/
