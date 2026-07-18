@@ -7,24 +7,34 @@
 
 import { sleep } from 'k6';
 
+import context from './core/context.js';
+import logger from './core/logger.js';
+import config from './config.js';
+
+import {
+    thinkTimeDuration,
+} from './core/metrics.js';
+
 class ThinkTime {
-    constructor() {
-        this.isEnabled = true;
-    }
-
     fixed(seconds) {
-        this.validateSeconds(seconds, 'ThinkTime');
+        this.validateSeconds(seconds);
 
-        if (!this.isEnabled) {
-            console.log(
-                `[THINK TIME SKIP] FIXED=${seconds}s | VU=${__VU} | ITER=${__ITER}`
-            );
-
+        if (!config.get('thinkTimeEnabled')) {
             return 0;
         }
 
-        console.log(
-            `[THINK TIME] FIXED=${seconds}s | VU=${__VU} | ITER=${__ITER}`
+        if (config.get('thinkTimeLoggingEnabled')) {
+            logger.debug('Think time started', {
+                mode: 'FIXED',
+                seconds,
+            });
+        }
+
+        thinkTimeDuration.add(
+            seconds * 1000,
+            context.getTags({
+                mode: 'FIXED',
+            })
         );
 
         sleep(seconds);
@@ -33,62 +43,63 @@ class ThinkTime {
     }
 
     random(minSeconds, maxSeconds) {
-        this.validateRange(minSeconds, maxSeconds);
+        this.validateRange(
+            minSeconds,
+            maxSeconds
+        );
 
         const seconds =
-            minSeconds + Math.random() * (maxSeconds - minSeconds);
+            minSeconds +
+            Math.random() *
+            (maxSeconds - minSeconds);
 
-        const roundedSeconds =
+        const rounded =
             Math.round(seconds * 1000) / 1000;
 
-        if (!this.isEnabled) {
-            console.log(
-                `[THINK TIME SKIP] RANDOM=${roundedSeconds}s | RANGE=${minSeconds}-${maxSeconds}s | VU=${__VU} | ITER=${__ITER}`
-            );
-
+        if (!config.get('thinkTimeEnabled')) {
             return 0;
         }
 
-        console.log(
-            `[THINK TIME] RANDOM=${roundedSeconds}s | RANGE=${minSeconds}-${maxSeconds}s | VU=${__VU} | ITER=${__ITER}`
+        if (config.get('thinkTimeLoggingEnabled')) {
+            logger.debug('Think time started', {
+                mode: 'RANDOM',
+                seconds: rounded,
+                minimum: minSeconds,
+                maximum: maxSeconds,
+            });
+        }
+
+        thinkTimeDuration.add(
+            rounded * 1000,
+            context.getTags({
+                mode: 'RANDOM',
+            })
         );
 
-        sleep(roundedSeconds);
+        sleep(rounded);
 
-        return roundedSeconds;
+        return rounded;
     }
 
-    enabled() {
-        this.isEnabled = true;
-
-        console.log('[THINK TIME CONFIG] ENABLED');
-    }
-
-    disabled() {
-        this.isEnabled = false;
-
-        console.log('[THINK TIME CONFIG] DISABLED');
-    }
-
-    validateSeconds(seconds, type) {
+    validateSeconds(seconds) {
         if (
             typeof seconds !== 'number' ||
             Number.isNaN(seconds) ||
             seconds < 0
         ) {
             throw new Error(
-                `${type} seconds must be a number greater than or equal to 0.`
+                'Think time must be a number greater than or equal to 0.'
             );
         }
     }
 
     validateRange(minSeconds, maxSeconds) {
-        this.validateSeconds(minSeconds, 'Minimum think time');
-        this.validateSeconds(maxSeconds, 'Maximum think time');
+        this.validateSeconds(minSeconds);
+        this.validateSeconds(maxSeconds);
 
         if (minSeconds > maxSeconds) {
             throw new Error(
-                'Minimum think time cannot be greater than maximum think time.'
+                'Minimum think time cannot exceed maximum think time.'
             );
         }
     }

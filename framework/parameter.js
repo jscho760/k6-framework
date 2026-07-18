@@ -1,83 +1,168 @@
 import { SharedArray } from 'k6/data';
 
-/**
- * CSV Parser
- * 첫 번째 행을 Header로 사용
- */
-function parseCSV(text) {
-    const lines = text.trim().split(/\r?\n/);
+class Parameter {
+    constructor() {
+        this.datasets = {};
+        this.cursors = {};
+    }
 
-    const headers = lines[0].split(',');
+    load(name, filePath) {
+        this.validateName(name);
 
-    return lines.slice(1).map(line => {
+        if (
+            typeof filePath !== 'string' ||
+            filePath.trim().length === 0
+        ) {
+            throw new Error(
+                'Parameter file path is empty.'
+            );
+        }
 
-        const values = line.split(',');
+        const dataset = new SharedArray(
+            `PEF_PARAMETER_${name}`,
+            function () {
+                return parseCSV(open(filePath));
+            }
+        );
 
+        if (dataset.length === 0) {
+            throw new Error(
+                `Parameter '${name}' contains no data.`
+            );
+        }
+
+        this.datasets[name] = dataset;
+        this.cursors[name] = 0;
+
+        return this;
+    }
+
+    next(name) {
+        const dataset = this.getDataset(name);
+        const index = this.cursors[name] % dataset.length;
+
+        this.cursors[name] += 1;
+
+        return dataset[index];
+    }
+
+    random(name) {
+        const dataset = this.getDataset(name);
+        const index = Math.floor(
+            Math.random() * dataset.length
+        );
+
+        return dataset[index];
+    }
+
+    byVU(name) {
+        const dataset = this.getDataset(name);
+        const vu = typeof __VU === 'undefined' ? 1 : __VU;
+        const index = (vu - 1) % dataset.length;
+
+        return dataset[index];
+    }
+
+    byITER(name) {
+        const dataset = this.getDataset(name);
+        const iteration =
+            typeof __ITER === 'undefined' ? 0 : __ITER;
+
+        return dataset[iteration % dataset.length];
+    }
+
+    size(name) {
+        return this.getDataset(name).length;
+    }
+
+    getDataset(name) {
+        if (!Object.prototype.hasOwnProperty.call(
+            this.datasets,
+            name
+        )) {
+            throw new Error(
+                `Parameter '${name}' is not loaded.`
+            );
+        }
+
+        return this.datasets[name];
+    }
+
+    validateName(name) {
+        if (
+            typeof name !== 'string' ||
+            name.trim().length === 0
+        ) {
+            throw new Error(
+                'Parameter name is empty.'
+            );
+        }
+    }
+}
+
+function parseCSV(content) {
+    const lines = String(content)
+        .replace(/\r/g, '')
+        .split('\n')
+        .filter(function (line) {
+            return line.trim().length > 0;
+        });
+
+    if (lines.length < 2) {
+        return [];
+    }
+
+    const headers = splitCSVLine(lines[0]);
+
+    return lines.slice(1).map(function (line) {
+        const values = splitCSVLine(line);
         const row = {};
 
-        headers.forEach((header, index) => {
-            row[header.trim()] = values[index].trim();
+        headers.forEach(function (header, index) {
+            row[header.trim()] =
+                values[index] === undefined
+                    ? ''
+                    : values[index].trim();
         });
 
         return row;
     });
 }
 
-class Parameter {
+function splitCSVLine(line) {
+    const values = [];
+    let current = '';
+    let quoted = false;
 
-    constructor() {
-        this.tables = {};
-        this.index = {};
-    }
+    for (let index = 0; index < line.length; index += 1) {
+        const character = line[index];
 
-    load(name, file) {
+        if (character === '"') {
+            if (
+                quoted &&
+                line[index + 1] === '"'
+            ) {
+                current += '"';
+                index += 1;
+            } else {
+                quoted = !quoted;
+            }
 
-        this.tables[name] = new SharedArray(name, () => {
-
-            return parseCSV(open(file));
-
-        });
-
-        this.index[name] = 0;
-    }
-
-    next(name) {
-
-        const table = this.tables[name];
-
-        const row = table[this.index[name]];
-
-        this.index[name]++;
-
-        if (this.index[name] >= table.length) {
-            this.index[name] = 0;
+            continue;
         }
 
-        return row;
+        if (character === ',' && !quoted) {
+            values.push(current);
+            current = '';
+            continue;
+        }
+
+        current += character;
     }
 
-    random(name) {
+    values.push(current);
 
-        const table = this.tables[name];
-
-        const idx = Math.floor(Math.random() * table.length);
-
-        return table[idx];
-    }
-
-    byVU(name) {
-
-        const table = this.tables[name];
-
-        return table[(__VU - 1) % table.length];
-    }
-
-    byITER(name) {
-
-        const table = this.tables[name];
-
-        return table[__ITER % table.length];
-    }
+    return values;
 }
 
 export default new Parameter();

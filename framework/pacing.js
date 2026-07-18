@@ -5,6 +5,14 @@
 
 import { sleep } from 'k6';
 
+import context from './core/context.js';
+import logger from './core/logger.js';
+import config from './config.js';
+
+import {
+    pacingWaitDuration,
+} from './core/metrics.js';
+
 class Pacing {
     constructor() {
         this.iterationStartTime = null;
@@ -13,52 +21,75 @@ class Pacing {
     start() {
         this.iterationStartTime = Date.now();
 
-        console.log(
-            `[PACING START] VU=${__VU} | ITER=${__ITER}`
-        );
+        if (config.get('pacingLoggingEnabled')) {
+            logger.debug('Pacing timer started');
+        }
 
-        return this.iterationStartTime;
+        return this;
     }
 
     fixed(targetSeconds) {
-        this.validateSeconds(targetSeconds, 'Pacing');
+        this.validateSeconds(targetSeconds);
 
-        const elapsedSeconds = this.getElapsedSeconds();
-        const waitSeconds = Math.max(
-            0,
-            targetSeconds - elapsedSeconds
+        return this.wait(
+            targetSeconds,
+            'FIXED'
         );
-
-        console.log(
-            `[PACING END] MODE=FIXED | TARGET=${targetSeconds}s | ELAPSED=${this.round(elapsedSeconds)}s | WAIT=${this.round(waitSeconds)}s | VU=${__VU} | ITER=${__ITER}`
-        );
-
-        if (waitSeconds > 0) {
-            sleep(waitSeconds);
-        }
-
-        this.iterationStartTime = null;
-
-        return waitSeconds;
     }
 
     random(minSeconds, maxSeconds) {
-        this.validateRange(minSeconds, maxSeconds);
+        this.validateRange(
+            minSeconds,
+            maxSeconds
+        );
 
         const targetSeconds =
-            minSeconds + Math.random() * (maxSeconds - minSeconds);
+            minSeconds +
+            Math.random() *
+            (maxSeconds - minSeconds);
 
-        const elapsedSeconds = this.getElapsedSeconds();
+        return this.wait(
+            targetSeconds,
+            'RANDOM'
+        );
+    }
+
+    wait(targetSeconds, mode) {
+        if (this.iterationStartTime === null) {
+            throw new Error(
+                'Pacing has not started. Call pacing.start() first.'
+            );
+        }
+
+        const elapsedSeconds =
+            (Date.now() - this.iterationStartTime) /
+            1000;
+
         const waitSeconds = Math.max(
             0,
             targetSeconds - elapsedSeconds
         );
 
-        console.log(
-            `[PACING END] MODE=RANDOM | TARGET=${this.round(targetSeconds)}s | RANGE=${minSeconds}-${maxSeconds}s | ELAPSED=${this.round(elapsedSeconds)}s | WAIT=${this.round(waitSeconds)}s | VU=${__VU} | ITER=${__ITER}`
+        if (config.get('pacingLoggingEnabled')) {
+            logger.debug('Pacing calculated', {
+                mode,
+                targetSeconds: this.round(targetSeconds),
+                elapsedSeconds: this.round(elapsedSeconds),
+                waitSeconds: this.round(waitSeconds),
+            });
+        }
+
+        pacingWaitDuration.add(
+            waitSeconds * 1000,
+            context.getTags({
+                mode,
+            })
         );
 
-        if (waitSeconds > 0) {
+        if (
+            config.get('pacingEnabled') &&
+            waitSeconds > 0
+        ) {
             sleep(waitSeconds);
         }
 
@@ -67,44 +98,25 @@ class Pacing {
         return waitSeconds;
     }
 
-    getElapsedSeconds() {
-        if (this.iterationStartTime === null) {
-            throw new Error(
-                'Pacing has not started. Call pacing.start() at the beginning of the iteration.'
-            );
-        }
-
-        return (
-            Date.now() - this.iterationStartTime
-        ) / 1000;
-    }
-
-    validateSeconds(seconds, type) {
+    validateSeconds(seconds) {
         if (
             typeof seconds !== 'number' ||
             Number.isNaN(seconds) ||
             seconds < 0
         ) {
             throw new Error(
-                `${type} seconds must be a number greater than or equal to 0.`
+                'Pacing must be a number greater than or equal to 0.'
             );
         }
     }
 
     validateRange(minSeconds, maxSeconds) {
-        this.validateSeconds(
-            minSeconds,
-            'Minimum pacing'
-        );
-
-        this.validateSeconds(
-            maxSeconds,
-            'Maximum pacing'
-        );
+        this.validateSeconds(minSeconds);
+        this.validateSeconds(maxSeconds);
 
         if (minSeconds > maxSeconds) {
             throw new Error(
-                'Minimum pacing cannot be greater than maximum pacing.'
+                'Minimum pacing cannot exceed maximum pacing.'
             );
         }
     }
