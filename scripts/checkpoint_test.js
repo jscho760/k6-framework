@@ -36,5 +36,7 @@ export default function () {
 
     checkpoint.responseTime(res, 3000);
 
+    checkpoint.status(res, 200, { stopOnFail: true });
+
 
 }
