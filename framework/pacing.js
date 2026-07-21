@@ -1,8 +1,3 @@
-//usage
-// pacing.start();
-//pacing.fixed(10);
-//pacing.random(10, 15);
-
 import { sleep } from 'k6';
 
 import context from './core/context.js';
@@ -10,7 +5,7 @@ import logger from './core/logger.js';
 import config from './config.js';
 
 import {
-    pacingWaitDuration,
+    pacingTime,
 } from './core/metrics.js';
 
 class Pacing {
@@ -79,7 +74,7 @@ class Pacing {
             });
         }
 
-        pacingWaitDuration.add(
+        pacingTime.add(
             waitSeconds * 1000,
             context.getTags({
                 mode,

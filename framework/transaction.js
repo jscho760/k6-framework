@@ -3,8 +3,8 @@ import logger from './core/logger.js';
 import config from './config.js';
 
 import {
-    transactionDuration,
-    transactionCount,
+    trxCounter,
+    trxDuration,
     transactionFailureRate,
 } from './core/metrics.js';
 
@@ -62,12 +62,8 @@ class Transaction {
             result: transactionResult,
         });
 
-        transactionDuration.add(elapsed, tags);
-        transactionCount.add(1, tags);
-        transactionFailureRate.add(
-            transactionResult === this.FAIL,
-            tags
-        );
+        trxDuration.add(elapsed, tags);
+        trxCounter.add(1, tags);
 
         if (config.get('transactionLoggingEnabled')) {
             logger.info('Transaction ended', {
@@ -78,6 +74,11 @@ class Transaction {
 
         delete this.startTimes[name];
         context.clearTransaction();
+
+        trxCounter.add(1, {
+            transaction: name,
+            result: transactionResult,
+        });
 
         return elapsed;
     }

@@ -6,7 +6,9 @@ import config from './config.js';
 
 import {
     checkpointCount,
-    checkpointFailureRate,
+    checkpointPass,
+    checkpointFail,
+    checkpointErrorRate,
 } from './core/metrics.js';
 
 class Checkpoint {
@@ -137,7 +139,13 @@ class Checkpoint {
         });
 
         checkpointCount.add(1, tags);
-        checkpointFailureRate.add(!passed, tags);
+        checkpointErrorRate.add(!passed, tags);
+
+        if (passed) {
+            checkpointPass.add(1, tags);
+        } else {
+            checkpointFail.add(1, tags);
+        }
 
         if (config.get('checkpointLoggingEnabled')) {
             const data = {

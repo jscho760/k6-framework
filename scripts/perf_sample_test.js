@@ -1,0 +1,496 @@
+import http from 'k6/http';
+
+import config from '../framework/config.js';
+import logger from '../framework/core/logger.js';
+
+import parameter from '../framework/parameter.js';
+import scenario from '../framework/scenario.js';
+import transaction from '../framework/transaction.js';
+import checkpoint from '../framework/checkpoint.js';
+import correlation from '../framework/correlation.js';
+import pacing from '../framework/pacing.js';
+
+import {
+    mainIterations,
+    loginIterations,
+    productListIterations,
+    productDetailIterations,
+    orderIterations,
+
+    mainHttpRequests,
+    loginHttpRequests,
+    productListHttpRequests,
+    productDetailHttpRequests,
+    orderHttpRequests,
+
+    mainResponseTime,
+    loginResponseTime,
+    productListResponseTime,
+    productDetailResponseTime,
+    orderResponseTime,
+
+    mainErrorRate,
+    loginErrorRate,
+    productListErrorRate,
+    productDetailErrorRate,
+    orderErrorRate,
+} from '../framework/core/metrics.js';
+
+import {
+    generateSummary,
+} from '../framework/report/summary.js';
+
+// ------------------------------------------------------------------
+// Framework configuration
+// ------------------------------------------------------------------
+
+config.load({
+    environment: __ENV.ENV || 'local',
+    baseUrl: __ENV.BASE_URL || 'http://localhost:8080',
+
+    logLevel: __ENV.LOG_LEVEL || 'ERROR',
+
+    transactionLoggingEnabled: true,
+    checkpointLoggingEnabled: true,
+    scenarioLoggingEnabled: true,
+
+    correlationLoggingEnabled: false,
+    thinkTimeLoggingEnabled: false,
+    pacingLoggingEnabled: false,
+
+    /*
+     * Arrival-rate executor가 TPS를 제어하므로
+     * pacing은 이 테스트에서 사용하지 않습니다.
+     */
+    thinkTimeEnabled: false,
+    pacingEnabled: false,
+
+    /*
+     * checkpoint 실패 시 해당 iteration 전체를 중단하지 않고
+     * 실패 metric만 기록합니다.
+     */
+    failOnCheckpointError: false,
+});
+
+logger.setLevel(config.get('logLevel'));
+
+parameter.load(
+    'USERS',
+    '../data/users.csv'
+);
+
+// ------------------------------------------------------------------
+// Load model
+// ------------------------------------------------------------------
+
+export const options = {
+    summaryTrendStats: [
+        'avg',
+        'min',
+        'med',
+        'max',
+        'p(90)',
+        'p(95)',
+    ],
+
+    scenarios: {
+        main_page: {
+            executor: 'constant-vus',
+            exec: 'mainPage',
+            vus: 10,
+            duration: '1m',
+            gracefulStop: '10s',
+
+            tags: {
+                workload: 'main',
+                business: 'Main_Page',
+            },
+        },
+
+        login: {
+            executor: 'constant-vus',
+            exec: 'login',
+            vus: 10,
+            duration: '1m',
+            gracefulStop: '10s',
+
+            tags: {
+                workload: 'login',
+                business: 'Login',
+            },
+        },
+
+        product_list: {
+            executor: 'constant-vus',
+            exec: 'productList',
+            vus: 50,
+            duration: '1m',
+            gracefulStop: '10s',
+
+            tags: {
+                workload: 'product_list',
+                business: 'Product_List',
+            },
+        },
+
+        product_detail: {
+            executor: 'constant-vus',
+            exec: 'productDetail',
+            vus: 20,
+            duration: '1m',
+            gracefulStop: '10s',
+
+            tags: {
+                workload: 'product_detail',
+                business: 'Product_Detail',
+            },
+        },
+
+        order: {
+            executor: 'constant-vus',
+            exec: 'order',
+            vus: 10,
+            duration: '1m',
+            gracefulStop: '10s',
+
+            tags: {
+                workload: 'order',
+                business: 'Order',
+            },
+        },
+    },
+
+    thresholds: {
+        http_req_failed: ['rate<0.01'],
+        http_req_duration: [
+            'p(95)<3000',
+            'p(99)<5000',
+        ],
+        pef_transaction_failure_rate: ['rate<0.01'],
+        pef_checkpoint_error_rate: ['rate<0.01'],
+        'pef_transaction_failure_rate{transaction:Login}': [
+        'rate<0.01',
+        ],
+
+        'pef_transaction_failure_rate{transaction:Product List}': [
+            'rate<0.01',
+        ],
+
+        'pef_transaction_failure_rate{transaction:Product Detail}': [
+            'rate<0.01',
+        ],
+
+        'pef_transaction_failure_rate{transaction:Order}': [
+            'rate<0.01',
+        ],
+    },
+
+    systemTags: [
+        'status',
+        'method',
+        'name',
+        'scenario',
+        'expected_response',
+    ],
+
+};
+
+// ------------------------------------------------------------------
+// Scenario 1: 메인 화면, 5 TPS
+// ------------------------------------------------------------------
+
+export function mainPage() {
+    pacing.start();
+
+    scenario.begin('Main_Page');
+    scenario.step('Open_Main_Page');
+
+    transaction.start('Main_Page');
+
+    const response = http.get(
+        config.url('/main'),
+        {
+            tags: {
+                name: 'GET_Main_Page',
+                transaction: 'Main_Page',
+            },
+        }
+    );
+
+    const statusPassed = checkpoint.status(
+        response,
+        200,
+        'Main_Page_Status'
+    );
+
+    transaction.end(
+        'Main_Page',
+        statusPassed
+    );
+
+    scenario.end(
+        'Main_Page',
+        statusPassed ? 'PASS' : 'FAIL'
+    );
+
+    pacing.fixed(1);
+
+}
+
+// ------------------------------------------------------------------
+// Scenario 2: 로그인, 5 TPS
+// ------------------------------------------------------------------
+
+export function login() {
+    pacing.start();
+
+    const user = parameter.byVU('USERS');
+
+    scenario.begin('Login');
+    scenario.step('Submit_Login');
+
+    transaction.start('Login');
+
+    const payload = JSON.stringify({
+        username: user.USER_ID,
+        password: user.PASSWORD,
+    });
+
+    const response = http.post(
+        config.url('/auth/login'),
+        payload,
+        {
+            headers: {
+                'Content-Type': 'application/json',
+            },
+
+            tags: {
+                name: 'POST_Login',
+                transaction: 'Login',
+            },
+        }
+    );
+
+    //const token = correlation.get("ACCESS_TOKEN");
+    // Login
+    //correlation.save(
+    //    "ACCESS_TOKEN",
+    //    response,
+    //    "$.accessToken"
+    //);
+    
+    const statusPassed = checkpoint.status(
+        response,
+        200,
+        'Login_Status'
+    );
+
+    transaction.end(
+        'Login',
+        statusPassed
+    );
+
+    scenario.end(
+        'Login',
+        statusPassed ? 'PASS' : 'FAIL'
+    );
+
+    pacing.fixed(1);
+
+}
+
+// ------------------------------------------------------------------
+// Scenario 3: 상품 목록 조회, 25 TPS
+// ------------------------------------------------------------------
+
+export function productList() {
+    pacing.start();
+
+    scenario.begin('Product_List');
+    scenario.step('Search_Products');
+
+    transaction.start('Product_List');
+
+    //const token = correlation.get("ACCESS_TOKEN");
+
+    const token = __ENV.ACCESS_TOKEN || "PEF_TEST_TOKEN";
+
+    const response = http.get(
+        config.url('/products'),
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+
+            tags: {
+                name: 'GET_Product_List',
+                transaction: 'Product_List',
+            }
+        }
+    );
+
+    const statusPassed = checkpoint.status(
+        response,
+        200,
+        'Product_List_Status'
+    );
+
+    const responseTimePassed =
+        checkpoint.responseTime(
+            response,
+            3000,
+            'Product_List_Response_Time'
+        );
+
+    const passed =
+        statusPassed &&
+        responseTimePassed;
+
+    transaction.end(
+        'Product_List',
+        passed
+    );
+
+    scenario.end(
+        'Product_List',
+        passed ? 'PASS' : 'FAIL'
+    );
+
+    pacing.fixed(1);
+
+}
+
+// ------------------------------------------------------------------
+// Scenario 4: 상품 상세조회, 10 TPS
+// ------------------------------------------------------------------
+
+export function productDetail() {
+    pacing.start();
+
+    /*
+     * 1~100번 상품을 임의 선택합니다.
+     */
+    
+    const token = __ENV.ACCESS_TOKEN || "PEF_TEST_TOKEN";  
+
+    const productId = 1;
+    
+    //const productId = Math.floor(Math.random() * 100) + 1;
+
+    scenario.begin('Product_Detail');
+    scenario.step('Open_Product_Detail');
+
+    transaction.start('Product_Detail');
+
+    const response = http.get(
+        config.url(`/products/${productId}`),
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+            
+            tags: {
+                name: 'GET_Product_Detail',
+                transaction: 'Product_Detail',
+            },
+        }
+    );
+
+ //   console.log(
+ //       `[PRODUCT DETAIL] url=${response.url}, status=${response.status}, token=${token}, body=${response.body}`
+ //   );
+
+    const statusPassed = checkpoint.status(
+        response,
+        200,
+        'Product_Detail_Status'
+    );
+
+    transaction.end(
+        'Product_Detail',
+        statusPassed
+    );
+
+    scenario.end(
+        'Product_Detail',
+        statusPassed ? 'PASS' : 'FAIL'
+    );
+
+    pacing.fixed(1);
+
+}
+
+// ------------------------------------------------------------------
+// Scenario 5: 주문, 5 TPS
+// ------------------------------------------------------------------
+
+export function order() {
+    pacing.start();
+
+    const user = parameter.byVU('USERS');
+
+    const token = __ENV.ACCESS_TOKEN || 'PEF_TEST_TOKEN';
+
+    const productId = 1;
+
+    //const productId = Math.floor(Math.random() * 100) + 1;
+
+    const quantity =
+        Math.floor(Math.random() * 3) + 1;
+
+    scenario.begin('Order');
+    scenario.step('Submit_Order');
+
+    transaction.start('Order');
+
+    const payload = JSON.stringify({
+        userId: user.USER_ID,
+        productId,
+        quantity,
+    });
+
+
+    const response = http.post(
+        config.url('/orders'),
+        payload,
+        {
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+
+            tags: {
+                name: 'POST_Order',
+                transaction: 'Order',
+            },
+        }
+    );
+
+
+//    console.log(
+//       `[ORDER] url=${response.url}, status=${response.status}, token=${token}, body=${response.body}`
+//    );
+    
+    const statusPassed = checkpoint.status(
+        response,
+        201,
+        'Order_Status'
+    );
+
+    transaction.end(
+        'Order',
+        statusPassed
+    );
+
+    scenario.end(
+        'Order',
+        statusPassed ? 'PASS' : 'FAIL'
+    );
+
+    pacing.fixed(1);
+
+}
+
+export function handleSummary(data) {
+    return generateSummary(data);
+}

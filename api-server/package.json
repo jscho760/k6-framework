@@ -1,0 +1,9 @@
+{
+  "name": "mock-api",
+  "version": "1.0.0",
+  "description": "Performance Lab API",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

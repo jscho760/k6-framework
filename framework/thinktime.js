@@ -1,10 +1,3 @@
-//usage
-//thinktime.fixed(3);
-//thinktime.random(1, 5);
-//thinktime.disabled();
-//thinktime.enabled();
-
-
 import { sleep } from 'k6';
 
 import context from './core/context.js';
@@ -12,7 +5,11 @@ import logger from './core/logger.js';
 import config from './config.js';
 
 import {
-    thinkTimeDuration,
+    thinkTime
+} from "./core/metrics.js";
+
+import {
+    thinkTime,
 } from './core/metrics.js';
 
 class ThinkTime {
@@ -30,7 +27,7 @@ class ThinkTime {
             });
         }
 
-        thinkTimeDuration.add(
+        thinkTime.add(
             seconds * 1000,
             context.getTags({
                 mode: 'FIXED',
@@ -69,7 +66,7 @@ class ThinkTime {
             });
         }
 
-        thinkTimeDuration.add(
+        thinkTime.add(
             rounded * 1000,
             context.getTags({
                 mode: 'RANDOM',

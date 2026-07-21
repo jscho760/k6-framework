@@ -3,9 +3,9 @@ import logger from './core/logger.js';
 import config from './config.js';
 
 import {
-    scenarioDuration,
-    scenarioCount,
-} from './core/metrics.js';
+    scenarioCounter,
+    scenarioDuration
+} from "./core/metrics.js";
 
 class Scenario {
     constructor() {
@@ -79,7 +79,7 @@ class Scenario {
         });
 
         scenarioDuration.add(elapsed, tags);
-        scenarioCount.add(1, tags);
+        scenarioCounter.add(1, tags);
 
         if (config.get('scenarioLoggingEnabled')) {
             logger.info('Scenario ended', {
