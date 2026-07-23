@@ -1,113 +1,244 @@
-import context from './core/context.js';
-import logger from './core/logger.js';
-import config from './config.js';
-
 import {
     scenarioCounter,
-    scenarioDuration
-} from "./core/metrics.js";
 
-class Scenario {
-    constructor() {
-        this.startTimes = {};
+    mainHttpRequests,
+    mainResponseTime,
+    mainErrorRate,
+
+    loginHttpRequests,
+    loginResponseTime,
+    loginErrorRate,
+
+    productListHttpRequests,
+    productListResponseTime,
+    productListErrorRate,
+
+    productDetailHttpRequests,
+    productDetailResponseTime,
+    productDetailErrorRate,
+
+    orderHttpRequests,
+    orderResponseTime,
+    orderErrorRate,
+} from './core/metrics.js';
+
+/*
+ * Scenario 이름과 Metric 객체 연결
+ */
+const SCENARIO_METRICS = {
+    Main_Page: {
+        requestCounter: mainHttpRequests,
+        responseTrend: mainResponseTime,
+        errorRate: mainErrorRate,
+    },
+
+    Login: {
+        requestCounter: loginHttpRequests,
+        responseTrend: loginResponseTime,
+        errorRate: loginErrorRate,
+    },
+
+    Product_List: {
+        requestCounter: productListHttpRequests,
+        responseTrend: productListResponseTime,
+        errorRate: productListErrorRate,
+    },
+
+    Product_Detail: {
+        requestCounter: productDetailHttpRequests,
+        responseTrend: productDetailResponseTime,
+        errorRate: productDetailErrorRate,
+    },
+
+    Order: {
+        requestCounter: orderHttpRequests,
+        responseTrend: orderResponseTime,
+        errorRate: orderErrorRate,
+    },
+};
+
+const SCENARIO_ALIASES = {
+    main: 'Main_Page',
+    main_page: 'Main_Page',
+    'main page': 'Main_Page',
+    homepage: 'Main_Page',
+
+    login: 'Login',
+
+    product_list: 'Product_List',
+    'product list': 'Product_List',
+    productlist: 'Product_List',
+
+    product_detail: 'Product_Detail',
+    'product detail': 'Product_Detail',
+    productdetail: 'Product_Detail',
+
+    order: 'Order',
+};
+
+class ScenarioRecorder {
+    start(name) {
+        return this.resolveName(name);
     }
 
     begin(name) {
-        this.validateName(name);
-
-        if (Object.prototype.hasOwnProperty.call(
-            this.startTimes,
-            name
-        )) {
-            throw new Error(
-                `Scenario '${name}' already started.`
-            );
-        }
-
-        context.reset();
-        context.setScenario(name);
-
-        this.startTimes[name] = Date.now();
-
-        if (config.get('scenarioLoggingEnabled')) {
-            logger.info('Scenario started');
-        }
-
-        return this;
+        return this.resolveName(name);
     }
 
-    step(name) {
-        context.setStep(name);
-
-        if (config.get('scenarioLoggingEnabled')) {
-            logger.debug(`Scenario step: ${name}`);
-        }
-
-        return this;
-    }
-
-    clearStep() {
-        context.clearStep();
-        return this;
-    }
-
-    end(name, result) {
+    record(name, response, options = {}) {
         const scenarioName =
-            name || context.getScenario();
+            this.resolveName(name);
 
-        this.validateName(scenarioName);
+        const metricSet =
+            SCENARIO_METRICS[scenarioName];
 
-        if (!Object.prototype.hasOwnProperty.call(
-            this.startTimes,
-            scenarioName
-        )) {
+        if (!response) {
             throw new Error(
-                `Scenario '${scenarioName}' not started.`
+                `HTTP response is required for Scenario '${scenarioName}'.`
             );
         }
 
-        const scenarioResult =
-            result || 'PASS';
+        const status =
+            Number(response.status || 0);
 
-        const elapsed =
-            Date.now() -
-            this.startTimes[scenarioName];
+        const duration =
+            response.timings &&
+            typeof response.timings.duration === 'number'
+                ? response.timings.duration
+                : 0;
 
-        const tags = context.getTags({
+        const failed =
+            this.isFailed(status, options);
+
+        const tags = {
+            pef_scenario: scenarioName,
+            result: failed ? 'FAIL' : 'PASS',
+            status: String(status),
+        };
+
+        metricSet.requestCounter.add(
+            1,
+            tags
+        );
+
+        metricSet.responseTrend.add(
+            duration,
+            tags
+        );
+
+        metricSet.errorRate.add(
+            failed,
+            tags
+        );
+
+        return {
             scenario: scenarioName,
-            result: scenarioResult,
-        });
-
-        scenarioDuration.add(elapsed, tags);
-        scenarioCounter.add(1, tags);
-
-        if (config.get('scenarioLoggingEnabled')) {
-            logger.info('Scenario ended', {
-                result: scenarioResult,
-                elapsedMs: elapsed,
-            });
-        }
-
-        delete this.startTimes[scenarioName];
-        context.reset();
-
-        return elapsed;
+            status,
+            duration,
+            passed: !failed,
+            failed,
+            result: failed ? 'FAIL' : 'PASS',
+        };
     }
 
-    current() {
-        return context.getScenario();
+    end(name, result = 'PASS') {
+        const scenarioName =
+            this.resolveName(name);
+
+        const normalizedResult =
+            this.normalizeResult(result);
+
+        scenarioCounter.add(
+            1,
+            {
+                pef_scenario: scenarioName,
+                result: normalizedResult,
+            }
+        );
+
+        return normalizedResult;
     }
 
-    validateName(name) {
-        if (
-            typeof name !== 'string' ||
-            name.trim().length === 0
-        ) {
+    fail(name) {
+        return this.end(
+            name,
+            'FAIL'
+        );
+    }
+
+    resolveName(name) {
+        if (!name) {
             throw new Error(
-                'Scenario name is empty.'
+                'Scenario name is required.'
             );
         }
+
+        if (SCENARIO_METRICS[name]) {
+            return name;
+        }
+
+        const aliasKey =
+            String(name)
+                .trim()
+                .toLowerCase();
+
+        const resolved =
+            SCENARIO_ALIASES[aliasKey];
+
+        if (!resolved) {
+            throw new Error(
+                `Unknown Scenario '${name}'. ` +
+                `Available scenarios: ${Object.keys(
+                    SCENARIO_METRICS
+                ).join(', ')}`
+            );
+        }
+
+        return resolved;
+    }
+
+    isFailed(status, options) {
+        if (typeof options.failed === 'boolean') {
+            return options.failed;
+        }
+
+        if (typeof options.passed === 'boolean') {
+            return !options.passed;
+        }
+
+        if (options.expectedStatus !== undefined) {
+            if (Array.isArray(options.expectedStatus)) {
+                return !options.expectedStatus.includes(
+                    status
+                );
+            }
+
+            return status !== Number(
+                options.expectedStatus
+            );
+        }
+
+        return status < 200 || status >= 400;
+    }
+
+    normalizeResult(result) {
+        if (
+            result === false ||
+            String(result).toUpperCase() === 'FAIL'
+        ) {
+            return 'FAIL';
+        }
+
+        return 'PASS';
     }
 }
 
-export default new Scenario();
+const scenario =
+    new ScenarioRecorder();
+
+export {
+    ScenarioRecorder,
+    scenario,
+};
+
+export default scenario;

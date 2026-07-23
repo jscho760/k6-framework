@@ -21,7 +21,8 @@ class Parameter {
         const dataset = new SharedArray(
             `PEF_PARAMETER_${name}`,
             function () {
-                return parseCSV(open(filePath));
+                return parseCSV(open(import.meta.resolve(filePath)));
+                //return parseCSV(open(filePath));
             }
         );
 

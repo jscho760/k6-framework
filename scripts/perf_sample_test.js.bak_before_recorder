@@ -53,7 +53,6 @@ parameter.load(
     '../data/users.csv'
 );
 
-
 // ------------------------------------------------------------------
 // Load model
 // ------------------------------------------------------------------
@@ -69,11 +68,11 @@ export const options = {
     ],
 
     scenarios: {
-        '01_main_page': {
+        main_page: {
             executor: 'constant-vus',
             exec: 'mainPage',
             vus: 10,
-            duration: '10s',
+            duration: '1m',
             gracefulStop: '10s',
 
             tags: {
@@ -82,11 +81,11 @@ export const options = {
             },
         },
 
-        '02_login': {
+        login: {
             executor: 'constant-vus',
             exec: 'login',
             vus: 10,
-            duration: '10s',
+            duration: '1m',
             gracefulStop: '10s',
 
             tags: {
@@ -95,11 +94,11 @@ export const options = {
             },
         },
 
-        '03_product_list': {
+        product_list: {
             executor: 'constant-vus',
             exec: 'productList',
             vus: 50,
-            duration: '10s',
+            duration: '1m',
             gracefulStop: '10s',
 
             tags: {
@@ -108,11 +107,11 @@ export const options = {
             },
         },
 
-        '04_product_detail': {
+        product_detail: {
             executor: 'constant-vus',
             exec: 'productDetail',
             vus: 20,
-            duration: '10s',
+            duration: '1m',
             gracefulStop: '10s',
 
             tags: {
@@ -121,11 +120,11 @@ export const options = {
             },
         },
 
-        '05_order': {
+        order: {
             executor: 'constant-vus',
             exec: 'order',
             vus: 10,
-            duration: '10s',
+            duration: '1m',
             gracefulStop: '10s',
 
             tags: {
@@ -134,6 +133,40 @@ export const options = {
             },
         },
     },
+
+    thresholds: {
+        http_req_failed: ['rate<0.01'],
+        http_req_duration: [
+            'p(95)<3000',
+            'p(99)<5000',
+        ],
+        pef_transaction_failure_rate: ['rate<0.01'],
+        pef_checkpoint_error_rate: ['rate<0.01'],
+        'pef_transaction_failure_rate{transaction:Login}': [
+        'rate<0.01',
+        ],
+
+        'pef_transaction_failure_rate{transaction:Product List}': [
+            'rate<0.01',
+        ],
+
+        'pef_transaction_failure_rate{transaction:Product Detail}': [
+            'rate<0.01',
+        ],
+
+        'pef_transaction_failure_rate{transaction:Order}': [
+            'rate<0.01',
+        ],
+    },
+
+    systemTags: [
+        'status',
+        'method',
+        'name',
+        'scenario',
+        'expected_response',
+    ],
+
 };
 
 // ------------------------------------------------------------------
@@ -143,90 +176,52 @@ export const options = {
 export function mainPage() {
     pacing.start();
 
-    const scenarioName = 'Main_Page';
-    const trxName = 'Main_Page';
-
-    let trxResult = transaction.FAIL;
-    let trxStarted = false;
+    //scenario.start('Main_Page');
+    //scenario.step('Open_Main_Page');
 
     try {
-        transaction.start(trxName);
-        trxStarted = true;
+
+        transaction.start('Main_Page');
+        transactionStarted = true;
 
         const response = http.get(
             config.url('/main'),
             {
                 tags: {
-                    name:
-                        'GET_Main_Page',
-
-                    transaction:
-                        trxName,
-
-                    pef_scenario:
-                        scenarioName,
+                    name: 'GET_Main_Page',
+                    transaction: 'Main_Page',
                 },
             }
         );
 
-        const recordResult =
-            scenario.record(
-                scenarioName,
-                response,
-                {
-                    expectedStatus: 200,
-                }
-            );
-
-        const statusPassed =
-            checkpoint.status(
-                response,
-                200,
-                'Main_Page_Status'
-            );
-
-        trxResult =
-            statusPassed &&
-            recordResult.passed
-                ? transaction.PASS
-                : transaction.FAIL;
-
-    } catch (error) {
-        trxResult =
-            transaction.FAIL;
-
-        console.error(
-            `[PEF][ERROR]` +
-            `[SCENARIO=${scenarioName}] ` +
-            `${error.message}`
+        const recordResult = scenario.record(
+            'Main',
+            response,
+            {
+                expectedStatus: 200,
+            }
         );
 
-    } finally {
-        try {
-            if (trxStarted) {
-                transaction.end(
-                    trxName,
-                    trxResult
-                );
-            }
+        const statusPassed = checkpoint.status(
+            response,
+            200,
+            'Main_Page_Status'
+        );
 
-            scenario.end(
-                scenarioName,
-                trxResult
-            );
+        transaction.end(
+            'Main_Page',
+            statusPassed
+        );
 
-        } catch (error) {
-            console.error(
-                `[PEF][ERROR]` +
-                `[SCENARIO=${scenarioName}]` +
-                `[CLEANUP] ` +
-                `${error.message}`
-            );
+        scenario.end(
+            'Main_Page',
+            statusPassed ? 'PASS' : 'FAIL'
+        );
 
-        } finally {
-            pacing.fixed(1);
-        }
+        pacing.fixed(1);
+
     }
+
 }
 
 // ------------------------------------------------------------------
@@ -238,6 +233,7 @@ export function login() {
 
     const user = parameter.byVU('USERS');
 
+    //scenario.start('Login');
     //scenario.step('Submit_Login');
 
     transaction.start('Login');
@@ -298,6 +294,7 @@ export function login() {
 export function productList() {
     pacing.start();
 
+    //scenario.start('Product_List');
     //scenario.step('Search_Products');
 
     transaction.start('Product_List');
@@ -377,6 +374,7 @@ export function productDetail() {
     
     //const productId = Math.floor(Math.random() * 100) + 1;
 
+   //scenario.start('Product_Detail');
    //scenario.step('Open_Product_Detail');
 
     transaction.start('Product_Detail');
@@ -446,6 +444,7 @@ export function order() {
     const quantity =
         Math.floor(Math.random() * 3) + 1;
 
+    //scenario.start('Order');
     //scenario.step('Submit_Order');
 
     transaction.start('Order');

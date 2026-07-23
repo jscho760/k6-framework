@@ -1,0 +1,379 @@
+import {
+    scenarioCounter,
+    scenarioDuration,
+
+    mainHttpRequests,
+    mainResponseTime,
+    mainErrorRate,
+
+    loginHttpRequests,
+    loginResponseTime,
+    loginErrorRate,
+
+    productListHttpRequests,
+    productListResponseTime,
+    productListErrorRate,
+
+    productDetailHttpRequests,
+    productDetailResponseTime,
+    productDetailErrorRate,
+
+    orderHttpRequests,
+    orderResponseTime,
+    orderErrorRate,
+} from './core/metrics.js';
+
+/*
+ * Scenario metric registry
+ *
+ * 새로운 Scenario를 추가할 때 이 Registry에만 등록하면 된다.
+ */
+const SCENARIO_METRICS = {
+    Main: {
+        requestCounter: mainHttpRequests,
+        responseTrend: mainResponseTime,
+        errorRate: mainErrorRate,
+    },
+
+    Login: {
+        requestCounter: loginHttpRequests,
+        responseTrend: loginResponseTime,
+        errorRate: loginErrorRate,
+    },
+
+    Product_List: {
+        requestCounter: productListHttpRequests,
+        responseTrend: productListResponseTime,
+        errorRate: productListErrorRate,
+    },
+
+    Product_Detail: {
+        requestCounter: productDetailHttpRequests,
+        responseTrend: productDetailResponseTime,
+        errorRate: productDetailErrorRate,
+    },
+
+    Order: {
+        requestCounter: orderHttpRequests,
+        responseTrend: orderResponseTime,
+        errorRate: orderErrorRate,
+    },
+};
+
+/*
+ * 사용자가 입력하는 다양한 Scenario 이름을
+ * Framework 표준 이름으로 변환한다.
+ */
+const SCENARIO_ALIASES = {
+    main: 'Main',
+
+    login: 'Login',
+
+    product_list: 'Product_List',
+    'product list': 'Product_List',
+    productlist: 'Product_List',
+
+    product_detail: 'Product_Detail',
+    'product detail': 'Product_Detail',
+    productdetail: 'Product_Detail',
+
+    order: 'Order',
+};
+
+class ScenarioEngine {
+    constructor() {
+        /*
+         * k6는 각 VU마다 별도의 JS runtime을 사용하므로
+         * 이 객체는 VU별 Scenario 시작시간을 관리한다.
+         */
+        this.startTimes = {};
+        this.activeScenario = null;
+    }
+
+    /*
+     * Scenario 시작
+     */
+    start(name) {
+        if (!name) {
+            throw new Error('Scenario name is required.');
+        }
+
+        if (this.startTimes[name] !== undefined) {
+            throw new Error(`Scenario '${name}' has already started.`);
+        }
+
+        this.startTimes[name] = Date.now();
+        context.setScenario(name);
+    }
+
+    /*
+     * HTTP Response 자동 기록
+     *
+     * 사용 예:
+     * scenario.record('Login', response);
+     *
+     * 또는 start() 이후:
+     * scenario.record(response);
+     */
+    record(nameOrResponse, responseOrOptions, maybeOptions = {}) {
+        let scenarioName;
+        let response;
+        let options;
+
+        /*
+         * scenario.record(response)
+         */
+        if (
+            nameOrResponse &&
+            typeof nameOrResponse === 'object' &&
+            nameOrResponse.status !== undefined
+        ) {
+            if (!this.activeScenario) {
+                throw new Error(
+                    'No active scenario. ' +
+                    'Call scenario.start(name) first.'
+                );
+            }
+
+            scenarioName = this.activeScenario;
+            response = nameOrResponse;
+            options = responseOrOptions || {};
+        } else {
+            /*
+             * scenario.record('Login', response)
+             */
+            scenarioName = this.resolveName(nameOrResponse);
+            response = responseOrOptions;
+            options = maybeOptions || {};
+        }
+
+        if (!response) {
+            throw new Error(
+                `HTTP response is required for Scenario '${scenarioName}'.`
+            );
+        }
+
+        const metricSet = SCENARIO_METRICS[scenarioName];
+
+        if (!metricSet) {
+            throw new Error(
+                `Scenario metrics are not registered: '${scenarioName}'.`
+            );
+        }
+
+        const duration = this.getResponseDuration(response);
+
+        const failed = this.resolveFailure(
+            response,
+            options
+        );
+
+        const tags = {
+            scenario: scenarioName,
+            result: failed ? 'FAIL' : 'PASS',
+            status: String(response.status || 0),
+        };
+
+        /*
+         * Request Count
+         */
+        metricSet.requestCounter.add(
+            1,
+            tags
+        );
+
+        /*
+         * Response Time
+         */
+        metricSet.responseTrend.add(
+            duration,
+            tags
+        );
+
+        /*
+         * Error Rate
+         */
+        metricSet.errorRate.add(
+            failed,
+            tags
+        );
+
+        return {
+            scenario: scenarioName,
+            status: response.status || 0,
+            duration,
+            passed: !failed,
+            result: failed ? 'FAIL' : 'PASS',
+        };
+    }
+
+    /*
+     * Scenario 종료
+     */
+    end(name, result = this.PASS) {
+
+        if (!name) {
+            throw new Error('Scenario name is required.');
+        }
+
+        const startTime = this.startTimes[name];
+
+        if (startTime === undefined) {
+            throw new Error(`Scenario '${name}' has not started.`);
+        }
+
+        const elapsed = Date.now() - startTime;
+        const scenarioResult = this.resolveResult(result);
+
+        try {
+            scenarioDuration.add(elapsed, {
+                scenario: name,
+                result: scenarioResult,
+            });
+
+            scenarioCounter.add(1, {
+                scenario: name,
+                result: scenarioResult,
+            });
+
+            if (scenarioResult === this.FAIL) {
+                scenarioFailureRate.add(1, {
+                    scenario: name,
+                });
+            } else {
+                scenarioFailureRate.add(0, {
+                    scenario: name,
+                });
+            }
+
+            return elapsed;
+        } finally {
+            /*
+            * 메트릭 또는 로깅에서 오류가 발생해도
+            * 반드시 시작 상태를 제거합니다.
+            */
+            delete this.startTimes[name];
+            context.clearScenario();
+        }
+    }
+    /*
+     * Scenario 실패 종료
+     */
+    fail(name) {
+        return this.end(
+            name,
+            'FAIL'
+        );
+    }
+
+    /*
+     * 등록된 Scenario 이름인지 확인
+     */
+    resolveName(name) {
+        if (!name) {
+            throw new Error(
+                'Scenario name is required.'
+            );
+        }
+
+        if (SCENARIO_METRICS[name]) {
+            return name;
+        }
+
+        const aliasKey = String(name)
+            .trim()
+            .toLowerCase();
+
+        const resolved =
+            SCENARIO_ALIASES[aliasKey];
+
+        if (!resolved) {
+            throw new Error(
+                `Unknown Scenario '${name}'. ` +
+                `Available scenarios: ${Object.keys(
+                    SCENARIO_METRICS
+                ).join(', ')}`
+            );
+        }
+
+        return resolved;
+    }
+
+    /*
+     * k6 HTTP Response의 요청시간 추출
+     */
+    getResponseDuration(response) {
+        if (
+            response.timings &&
+            typeof response.timings.duration === 'number'
+        ) {
+            return response.timings.duration;
+        }
+
+        return 0;
+    }
+
+    /*
+     * 요청 성공/실패 판단
+     *
+     * 기본:
+     * 200~399 성공
+     *
+     * 사용자 지정:
+     * scenario.record(name, response, {
+     *     expectedStatus: 201
+     * });
+     */
+    resolveFailure(response, options) {
+        if (typeof options.failed === 'boolean') {
+            return options.failed;
+        }
+
+        if (
+            options.expectedStatus !== undefined
+        ) {
+            if (
+                Array.isArray(
+                    options.expectedStatus
+                )
+            ) {
+                return !options.expectedStatus.includes(
+                    response.status
+                );
+            }
+
+            return (
+                response.status !==
+                options.expectedStatus
+            );
+        }
+
+        const status =
+            Number(response.status || 0);
+
+        return (
+            status < 200 ||
+            status >= 400
+        );
+    }
+
+    normalizeResult(result) {
+        if (
+            result === false ||
+            result === 'FAIL'
+        ) {
+            return 'FAIL';
+        }
+
+        return 'PASS';
+    }
+}
+
+const scenario = new ScenarioEngine();
+
+export {
+    ScenarioEngine,
+    scenario,
+};
+
+export default scenario;

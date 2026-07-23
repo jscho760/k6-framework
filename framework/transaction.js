@@ -62,25 +62,45 @@ class Transaction {
             result: transactionResult,
         });
 
-        trxDuration.add(elapsed, tags);
-        trxCounter.add(1, tags);
+        try {
+            /*
+            * 트랜잭션 응답시간
+            */
+            trxDuration.add(
+                elapsed,
+                tags
+            );
 
-        if (config.get('transactionLoggingEnabled')) {
-            logger.info('Transaction ended', {
-                result: transactionResult,
-                elapsedMs: elapsed,
-            });
+            /*
+            * 트랜잭션 처리 건수
+            * Transaction 종료 1회당 1건
+            */
+            trxCounter.add(
+                1,
+                tags
+            );
+
+            /*
+            * 트랜잭션 실패율
+            */
+            transactionFailureRate.add(
+                transactionResult === this.FAIL,
+                tags
+            );
+
+            if (config.get('transactionLoggingEnabled')) {
+                logger.info('Transaction ended', {
+                    result: transactionResult,
+                    elapsedMs: elapsed,
+                });
+            }
+
+            return elapsed;
+
+        } finally {
+            delete this.startTimes[name];
+            context.clearTransaction();
         }
-
-        delete this.startTimes[name];
-        context.clearTransaction();
-
-        trxCounter.add(1, {
-            transaction: name,
-            result: transactionResult,
-        });
-
-        return elapsed;
     }
 
     fail(name) {

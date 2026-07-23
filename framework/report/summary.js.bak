@@ -1,75 +1,48 @@
 const LINE =
-    '======================================================================';
+    '============================================================';
 
 const TABLE_LINE =
-    '-----------------------------------------------------------------------';
+    '------------------------------------------------------------';
 
 const SCENARIOS = [
     {
-        name: '01_Main',
-        internalName: 'Main_Page',
+        name: 'Main',
         requestMetric: 'pef_main_http_requests',
         responseMetric: 'pef_main_response_time',
         errorMetric: 'pef_main_error_rate',
     },
     {
-        name: '02_Login',
-        internalName: 'Login',
+        name: 'Login',
         requestMetric: 'pef_login_http_requests',
         responseMetric: 'pef_login_response_time',
         errorMetric: 'pef_login_error_rate',
     },
     {
-        name: '03_Product List',
-        internalName: 'Product_List',
+        name: 'Product List',
         requestMetric: 'pef_product_list_http_requests',
         responseMetric: 'pef_product_list_response_time',
         errorMetric: 'pef_product_list_error_rate',
     },
     {
-        name: '04_Product Detail',
-        internalName: 'Product_Detail',
+        name: 'Product Detail',
         requestMetric: 'pef_product_detail_http_requests',
         responseMetric: 'pef_product_detail_response_time',
         errorMetric: 'pef_product_detail_error_rate',
     },
     {
-        name: '05_Order',
-        internalName: 'Order',
+        name: 'Order',
         requestMetric: 'pef_order_http_requests',
         responseMetric: 'pef_order_response_time',
         errorMetric: 'pef_order_error_rate',
     },
 ];
-        
+
 const TRANSACTIONS = [
-    {
-        name: 'Main Page',
-        tag: 'Main_Page',
-    },
-    {
-        name: 'Login',
-        tag: 'Login',
-    },
-    {
-        name: 'Product List',
-        tag: 'Product_List',
-    },
-    {
-        name: 'Product Detail',
-        tag: 'Product_Detail',
-    },
-    {
-        name: 'Order',
-        tag: 'Order',
-    },
+    'Login',
+    'Product List',
+    'Product Detail',
+    'Order',
 ];
-
-const TRANSACTION_COUNT_METRIC =
-    'pef_transaction_count';
-
-const TRANSACTION_DURATION_METRIC =
-    'pef_transaction_duration';
 
 export function generateSummary(data) {
     const report = buildReport(data);
@@ -107,84 +80,33 @@ function buildReport(data) {
             definition.errorMetric
         );
 
-        const count = Number(
-            requestValues.count || 0
-        );
-
-        const tps = Number(
-            requestValues.rate || 0
-        );
-
-        const avg = Number(
-            responseValues.avg || 0
-        );
-
-        const p95 = Number(
-            responseValues['p(95)'] || 0
-        );
-
-        const errorRate = Number(
-            errorValues.rate || 0
-        );
-
-        const fail = Math.round(
-            count * errorRate
-        );
-
-        const pass = Math.max(
-            count - fail,
-            0
-        );
-
         return {
             name: definition.name,
-            count,
-            tps,
-            avg,
-            p95,
-            errorRate,
-            pass,
-            fail,
+            count: numberValue(requestValues.count),
+            tps: numberValue(requestValues.rate),
+            avg: numberValue(responseValues.avg),
+            p95: numberValue(responseValues['p(95)']),
+            max: numberValue(responseValues.max),
+            errorRate: numberValue(errorValues.rate),
         };
     });
 
-    const transactions = TRANSACTIONS.map((trx) => {
-
-        const failureRate =
-            getTransactionFailureRate(
-                data,
-                trx.tag
-            );
+    const transactions = TRANSACTIONS.map((name) => {
+        const failureRate = getTransactionFailureRate(
+            data,
+            name
+        );
 
         return {
-
-            name: trx.name,
-
-            tag: trx.tag,
-
-            total: 0,
-
-            pass: 0,
-
-            fail: 0,
-
-            avg: 0,
-
-            p95: 0,
-
-            max: 0,
-
+            name,
             failureRate,
-
             result:
                 failureRate === null
                     ? 'N/A'
                     : failureRate === 0
                         ? 'PASS'
                         : 'FAIL',
-
         };
-
     });
 
     const checkpointPass = getCounterCount(
@@ -212,97 +134,26 @@ function buildReport(data) {
     };
 }
 
-
 function buildConsoleReport(report) {
-    const scenarioRows = report.scenarios.map(
-        (scenario) => {
-            return [
-                padRight(scenario.name, 20),
+    const rows = report.scenarios.map((scenario) => {
+        return [
+            padRight(scenario.name, 20),
+            padLeft(formatNumber(scenario.tps, 1), 7),
+            padLeft(formatMs(scenario.avg), 10),
+            padLeft(formatMs(scenario.p95), 10),
+            padLeft(formatPercent(scenario.errorRate), 9),
+        ].join('');
+    });
 
-                padLeft(
-                    formatNumber(scenario.tps, 1),
-                    7
-                ),
+    const transactionRows = report.transactions.map(
+        (transaction) => {
+            const dots = '.'.repeat(
+                Math.max(2, 32 - transaction.name.length)
+            );
 
-                padLeft(
-                    formatMs(scenario.avg),
-                    10
-                ),
-
-                padLeft(
-                    formatMs(scenario.p95),
-                    10
-                ),
-
-                padLeft(
-                    formatPercent(
-                        scenario.errorRate
-                    ),
-                    9
-                ),
-
-                padLeft(
-                    formatInteger(
-                        scenario.pass
-                    ),
-                    10
-                ),
-
-                padLeft(
-                    formatInteger(
-                        scenario.fail
-                    ),
-                    10
-                ),
-            ].join('');
+            return `${transaction.name}${dots}${transaction.result}`;
         }
     );
-
-    const transactionRows =
-        report.transactions.map(
-            (transaction) => {
-                return [
-                    padRight(
-                        transaction.name,
-                        20
-                    ),
-                    padLeft(
-                        formatInteger(
-                            transaction.total
-                        ),
-                        10
-                    ),
-                    padLeft(
-                        formatInteger(
-                            transaction.pass
-                        ),
-                        10
-                    ),
-                    padLeft(
-                        formatInteger(
-                            transaction.fail
-                        ),
-                        10
-                    ),
-                    padLeft(
-                        formatMs(
-                            transaction.avg
-                        ),
-                        10
-                    ),
-                    padLeft(
-                        formatMs(
-                            transaction.p95
-                        ),
-                        10
-                    ),
-                    padLeft(
-                        transaction.result || 'N/A',
-                        10
-                    ),
-                ].join('');
-            }
-        );
 
     return [
         '',
@@ -318,36 +169,32 @@ function buildConsoleReport(report) {
             padLeft('Avg', 10),
             padLeft('P95', 10),
             padLeft('Error', 9),
-            padLeft('PASS', 10),
-            padLeft('FAIL', 10),
         ].join(''),
         TABLE_LINE,
-        ...scenarioRows,
+        ...rows,
         TABLE_LINE,
         `TOTAL TPS${padLeft(
-            formatNumber(
-                report.totalTps,
-                1
-            ),
+            formatNumber(report.totalTps, 1),
             44
         )}`,
         '',
         LINE,
         '',
+        'Transaction Summary',
+        '',
+        ...transactionRows,
+        '',
+        LINE,
+        '',
         'Checkpoint Summary',
         '',
-        `PASS : ${formatInteger(
-            report.checkpoints.pass
-        )}`,
-        `FAIL : ${formatInteger(
-            report.checkpoints.fail
-        )}`,
+        `PASS : ${formatInteger(report.checkpoints.pass)}`,
+        `FAIL : ${formatInteger(report.checkpoints.fail)}`,
         '',
         LINE,
         '',
     ].join('\n');
 }
-
 
 function buildHtmlReport(report) {
     const scenarioRows = report.scenarios
@@ -662,200 +509,15 @@ function buildCsvReport(report) {
     return [header, ...rows].join('\n');
 }
 
-
-function buildTransactionMetrics(
-    data,
-    transactionTag
-) {
-    const metricKeys = Object.keys(
-        data && data.metrics
-            ? data.metrics
-            : {}
-    );
-
-    let total = 0;
-    let pass = 0;
-    let fail = 0;
-
-    let weightedDuration = 0;
-    let durationCount = 0;
-    let p95 = 0;
-    let max = 0;
-
-    for (const metricKey of metricKeys) {
-        /*
-         * Transaction 처리 건수
-         */
-        if (
-            metricKey.startsWith(
-                `${TRANSACTION_COUNT_METRIC}{`
-            )
-        ) {
-            const tags = parseMetricTags(metricKey);
-
-            if (
-                tags.transaction === transactionTag
-            ) {
-                const values = getValues(
-                    data,
-                    metricKey
-                );
-
-                const count =
-                    numberValue(values.count);
-
-                const result = String(
-                    tags.result || ''
-                ).toUpperCase();
-
-                total += count;
-
-                if (result === 'PASS') {
-                    pass += count;
-                }
-
-                if (result === 'FAIL') {
-                    fail += count;
-                }
-            }
-        }
-
-        /*
-         * Transaction 응답시간
-         */
-        if (
-            metricKey.startsWith(
-                `${TRANSACTION_DURATION_METRIC}{`
-            )
-        ) {
-            const tags = parseMetricTags(metricKey);
-
-            if (
-                tags.transaction === transactionTag
-            ) {
-                const values = getValues(
-                    data,
-                    metricKey
-                );
-
-                const count =
-                    numberValue(values.count);
-
-                const avg =
-                    numberValue(values.avg);
-
-                weightedDuration +=
-                    avg * count;
-
-                durationCount += count;
-
-                p95 = Math.max(
-                    p95,
-                    numberValue(
-                        values['p(95)']
-                    )
-                );
-
-                max = Math.max(
-                    max,
-                    numberValue(values.max)
-                );
-            }
-        }
-    }
-
-    const avg =
-        durationCount > 0
-            ? weightedDuration /
-                durationCount
-            : 0;
-
-    const failureRate =
-        total > 0
-            ? fail / total
-            : null;
-
-    return {
-        total,
-        pass,
-        fail,
-        avg,
-        p95,
-        max,
-        failureRate,
-        successRate:
-            total > 0
-                ? pass / total
-                : 0,
-        result:
-            total === 0
-                ? 'N/A'
-                : fail === 0
-                    ? 'PASS'
-                    : 'FAIL',
-    };
-}
-
-function parseMetricTags(metricName) {
-    const tags = {};
-
-    const startIndex =
-        metricName.indexOf('{');
-
-    const endIndex =
-        metricName.lastIndexOf('}');
-
-    if (
-        startIndex === -1 ||
-        endIndex === -1
-    ) {
-        return tags;
-    }
-
-    const tagText = metricName.substring(
-        startIndex + 1,
-        endIndex
-    );
-
-    const pairs = tagText.split(',');
-
-    for (const pair of pairs) {
-        let separatorIndex =
-            pair.indexOf(':');
-
-        if (separatorIndex === -1) {
-            separatorIndex =
-                pair.indexOf('=');
-        }
-
-        if (separatorIndex === -1) {
-            continue;
-        }
-
-        const key = pair
-            .substring(0, separatorIndex)
-            .trim()
-            .replace(/^"|"$/g, '');
-
-        const value = pair
-            .substring(separatorIndex + 1)
-            .trim()
-            .replace(/^"|"$/g, '');
-
-        tags[key] = value;
-    }
-
-    return tags;
-}
-
 function getValues(data, metricName) {
-    const metric = data.metrics?.[metricName];
+    const metric =
+        data &&
+        data.metrics &&
+        data.metrics[metricName];
 
-    if (!metric || !metric.values) {
-        return {};
-    }
-
-    return metric.values;
+    return metric && metric.values
+        ? metric.values
+        : {};
 }
 
 function getCounterCount(data, metricName) {
@@ -967,4 +629,141 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+
+
+//add counter//////////////////////////////////////////
+const TRANSACTION_COUNT_METRIC =
+    'pef_transaction_count';
+
+const TRANSACTION_DURATION_METRIC =
+    'pef_transaction_duration';
+
+function buildTransactionSummary(data) {
+    const summaryMap = {};
+
+    const metricNames = Object.keys(
+        data.metrics || {}
+    );
+
+    for (const metricName of metricNames) {
+        /*
+         * 트랜잭션 건수 Metric만 조회
+         */
+        if (
+            !metricName.startsWith(
+                `${TRANSACTION_COUNT_METRIC}{`
+            )
+        ) {
+            continue;
+        }
+
+        const tags =
+            parseMetricTags(metricName);
+
+        const transactionName =
+            tags.transaction;
+
+        const result =
+            String(tags.result || 'PASS')
+                .toUpperCase();
+
+        if (!transactionName) {
+            continue;
+        }
+
+        if (!summaryMap[transactionName]) {
+            summaryMap[transactionName] = {
+                name: transactionName,
+                total: 0,
+                pass: 0,
+                fail: 0,
+                avg: 0,
+                p95: 0,
+                min: 0,
+                max: 0,
+            };
+        }
+
+        const count = getMetricCount(
+            data.metrics[metricName]
+        );
+
+        summaryMap[transactionName].total +=
+            count;
+
+        if (result === 'FAIL') {
+            summaryMap[transactionName].fail +=
+                count;
+        } else {
+            summaryMap[transactionName].pass +=
+                count;
+        }
+    }
+
+    /*
+     * 트랜잭션 응답시간 집계
+     */
+    for (const metricName of metricNames) {
+        if (
+            !metricName.startsWith(
+                `${TRANSACTION_DURATION_METRIC}{`
+            )
+        ) {
+            continue;
+        }
+
+        const tags =
+            parseMetricTags(metricName);
+
+        const transactionName =
+            tags.transaction;
+
+        if (
+            !transactionName ||
+            !summaryMap[transactionName]
+        ) {
+            continue;
+        }
+
+        const metric =
+            data.metrics[metricName];
+
+        const row =
+            summaryMap[transactionName];
+
+        /*
+         * PASS/FAIL tagged duration을 합칠 때
+         * 단순 평균을 사용하지 않고,
+         * 해당 tagged metric 값을 참고한다.
+         *
+         * 우선 대표값이 없는 경우에만 설정한다.
+         */
+        if (row.avg === 0) {
+            row.avg = getMetricValue(
+                metric,
+                'avg'
+            );
+
+            row.p95 =
+                getMetricValue(metric, 'p(95)') ||
+                getMetricValue(metric, 'p(95.0)');
+
+            row.min = getMetricValue(
+                metric,
+                'min'
+            );
+
+            row.max = getMetricValue(
+                metric,
+                'max'
+            );
+        }
+    }
+
+    return Object.values(summaryMap)
+        .sort((a, b) =>
+            a.name.localeCompare(b.name)
+        );
 }
